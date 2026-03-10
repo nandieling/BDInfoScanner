@@ -39,7 +39,7 @@
 ### 编译步骤
 1. 克隆本项目到本地：
    ```bash
-   git clone [https://github.com/你的用户名/BDInfoScanner.git](https://github.com/你的用户名/BDInfoScanner.git)
+   git clone [https://github.com/nandieling/BDInfoScanner.git](https://github.com/nandieling/BDInfoScanner.git)
 
 ```
 
