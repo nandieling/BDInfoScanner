@@ -17,8 +17,7 @@
 
 ## 📸 应用截图
 
-> （建议提示：在 GitHub 上传后，在这里替换为你的软件实际运行截图）
-> ![应用截图](你的截图链接地址)
+
 
 ## 📦 安装与使用
 
@@ -44,7 +43,7 @@
 ```
 
 2. **下载核心引擎**：
-前往 [tetrahydroc/BDInfoCLI](https://www.google.com/search?q=https://github.com/tetrahydroc/BDInfoCLI/releases) 下载对应 Mac 架构（`arm64` 或 `x64`）的独立执行文件。
+前往（https://github.com/tetrahydroc/BDInfoCLI/releases) 下载对应 Mac 架构（`arm64` 或 `x64`）的独立执行文件。
 3. 将下载的文件重命名为 `bdinfo-cli`。
 4. **赋予执行权限**：
 ```bash
@@ -68,10 +67,3 @@ chmod +x /路径/到你的/bdinfo-cli
 
 ```
 
----
-
-**下一步建议：**
-
-现在代码、图标、安装包和自述文件（README）都已经齐备。你需要我教你**如何使用 Xcode 内置的 Git 功能，或者通过 Mac 终端，将这个项目一键推送到你自己的 GitHub 仓库上吗？**
-
-```
