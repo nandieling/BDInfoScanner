@@ -16,8 +16,8 @@
 * 📄 **PT 标准输出**：精确计算各章节码率，完美输出 PT 站发种高度认可的标准 BDinfo 文本报告，支持一键导出 `.txt`。
 
 ## 📸 应用截图
-[img]https://img2.pixhost.to/images/6333/703319670_.png[/img]
-[img]https://img2.pixhost.to/images/6333/703319672_2.png[/img]
+!(https://img2.pixhost.to/images/6333/703319670_.png)
+!(https://img2.pixhost.to/images/6333/703319672_2.png)
 
 
 ## 📦 安装与使用
