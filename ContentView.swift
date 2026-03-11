@@ -2,7 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct ContentView: View {
-    @State private var bdInfoText: String = "请选择完整的蓝光原盘目录进行标准 BDinfo 扫描...\n\n(注意：标准物理扫描需要几分钟到十几分钟不等，具体取决于光盘体积和硬盘速度)"
+    @State private var bdInfoText: String = "请选择完整的蓝光原盘目录进行标准 BDinfo 扫描...\n\n(已搭载「UNIX 物理强杀」引擎，无视 macOS 隐藏机制，专治 exFAT 幽灵文件)"
     @State private var isScanning: Bool = false
     
     // 进度与时间相关状态
@@ -19,7 +19,6 @@ struct ContentView: View {
                 .fontWeight(.bold)
                 .padding(.top)
             
-            // 扫描结果展示区
             TextEditor(text: $bdInfoText)
                 .font(.system(.body, design: .monospaced))
                 .padding()
@@ -29,7 +28,6 @@ struct ContentView: View {
                     RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.5), lineWidth: 1)
                 )
             
-            // 进度条与状态展示区
             if isScanning {
                 VStack(spacing: 8) {
                     ProgressView(value: scanProgress, total: 1.0)
@@ -55,7 +53,6 @@ struct ContentView: View {
                 .frame(height: 50)
             }
             
-            // 操作按钮区
             HStack(spacing: 30) {
                 Button(action: selectAndScanFolder) {
                     if isScanning {
@@ -63,7 +60,7 @@ struct ContentView: View {
                         Text("正在扫描正片数据...")
                     } else {
                         Image(systemName: "opticaldisc")
-                        Text("选择 BDMV 并开始扫描")
+                        Text("选择 BDMV 目录并开始扫描")
                     }
                 }
                 .disabled(isScanning)
@@ -92,7 +89,6 @@ struct ContentView: View {
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
             guard let startTime = self.scanStartTime else { return }
             let elapsed = Date().timeIntervalSince(startTime)
-            
             DispatchQueue.main.async {
                 self.elapsedTimeString = self.formatTimeInterval(elapsed)
                 if self.scanProgress > 0.01 {
@@ -105,181 +101,189 @@ struct ContentView: View {
             }
         }
     }
-    
-    private func stopTimer() {
-        timer?.invalidate()
-        timer = nil
-    }
-    
+    private func stopTimer() { timer?.invalidate(); timer = nil }
     private func formatTimeInterval(_ interval: TimeInterval) -> String {
         guard interval > 0 && interval.isFinite else { return "00:00" }
         let totalSeconds = Int(interval)
-        let minutes = totalSeconds / 60
-        let seconds = totalSeconds % 60
-        return String(format: "%02d:%02d", minutes, seconds)
+        return String(format: "%02d:%02d", totalSeconds / 60, totalSeconds % 60)
     }
     
-    // MARK: - 选择文件夹
     private func selectAndScanFolder() {
         let panel = NSOpenPanel()
-        panel.canChooseFiles = false
+        panel.canChooseFiles = true
         panel.canChooseDirectories = true
-        panel.message = "请选择蓝光原盘的 BDMV 文件夹或其父目录"
+        panel.message = "请选择蓝光原盘目录，或直接选择视频文件"
+        if panel.runModal() == .OK, let selectedURL = panel.url { runStandardBDInfo(at: selectedURL) }
+    }
+    
+    // MARK: - 🛡️ 阶段 0：UNIX 底层物理强杀幽灵文件 (无视苹果隐藏机制)
+    private func cleanGhostFilesPOSIX(at url: URL) {
+        guard url.hasDirectoryPath else { return }
         
-        if panel.runModal() == .OK, let selectedURL = panel.url {
-            runStandardBDInfo(at: selectedURL)
+        let process = Process()
+        // 直接调用最底层的 UNIX find 指令，暴力搜索并删除所有 ._ 开头的文件
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/find")
+        process.arguments = [url.path, "-type", "f", "-name", "._*", "-delete"]
+        
+        do {
+            try process.run()
+            process.waitUntilExit()
+            print("UNIX 底层查杀完毕，状态码: \(process.terminationStatus)")
+        } catch {
+            print("UNIX 查杀执行失败: \(error)")
         }
     }
     
-    // MARK: - 🌟 阶段1：读取播放列表，寻找正片
+    // MARK: - 🌟 智能寻找最大的 .m2ts 文件
+    private func findLargestM2TS(in url: URL) -> String? {
+        if !url.hasDirectoryPath { return url.pathExtension.lowercased() == "m2ts" ? url.path : nil }
+        
+        let streamURL1 = url.appendingPathComponent("BDMV").appendingPathComponent("STREAM")
+        let streamURL2 = url.appendingPathComponent("STREAM")
+        var targetDir = url
+        if FileManager.default.fileExists(atPath: streamURL1.path) { targetDir = streamURL1 }
+        else if FileManager.default.fileExists(atPath: streamURL2.path) { targetDir = streamURL2 }
+        
+        do {
+            let fileURLs = try FileManager.default.contentsOfDirectory(at: targetDir, includingPropertiesForKeys: [.fileSizeKey])
+            let m2tsFiles = fileURLs.filter { $0.pathExtension.lowercased() == "m2ts" }
+            var largestFile: URL?, maxSize: Int = 0
+            for file in m2tsFiles {
+                if let resources = try? file.resourceValues(forKeys: [.fileSizeKey]), let size = resources.fileSize, size > maxSize {
+                    maxSize = size; largestFile = file
+                }
+            }
+            return largestFile?.path
+        } catch { return nil }
+    }
+    
+    // MARK: - 🌟 阶段 1：读取播放列表
     private func getTopPlaylist(at url: URL, executableURL: URL) -> String? {
+        if !url.hasDirectoryPath { return nil }
         let process = Process()
         process.executableURL = executableURL
-        // -l 参数：只列出播放列表，不扫描
         process.arguments = ["-l", url.path]
-        
         let pipe = Pipe()
         process.standardOutput = pipe
         
         do {
             try process.run()
-            process.waitUntilExit()
-            
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
             guard let output = String(data: data, encoding: .utf8) else { return nil }
-            
-            // 正则匹配第一个出现的 .MPLS 文件名 (BDInfo 默认将最长的主影片排在第一个)
             let pattern = "([0-9A-Za-z]+\\.[mM][pP][lL][sS])"
             if let regex = try? NSRegularExpression(pattern: pattern, options: []),
                let match = regex.firstMatch(in: output, options: [], range: NSRange(location: 0, length: output.utf16.count)) {
                 return (output as NSString).substring(with: match.range)
             }
             return nil
-        } catch {
-            return nil
-        }
+        } catch { return nil }
     }
     
-    // MARK: - 🌟 阶段2：定向启动扫描
+    // MARK: - 🌟 阶段 2：定向启动扫描
     private func runStandardBDInfo(at url: URL) {
         isScanning = true
-        bdInfoText = "▶ 正在启动 BDInfo 核心引擎...\n▶ 目标路径: \(url.path)\n\n正在提取播放列表树并侦测正片位置..."
+        bdInfoText = "▶ 正在启动 BDInfo 核心引擎...\n▶ 目标路径: \(url.path)\n"
         startTimer()
         
         DispatchQueue.global(qos: .userInitiated).async {
+            // 🛡️ 启动底层扫除
+            DispatchQueue.main.async { self.bdInfoText += "▶ 正在调用底层 UNIX 指令，暴力抹除 exFAT 幽灵文件...\n" }
+            self.cleanGhostFilesPOSIX(at: url)
+            
+            DispatchQueue.main.async { self.bdInfoText += "▶ 幽灵文件清扫完毕！开始提取播放列表树...\n" }
+            
             guard let executableURL = Bundle.main.url(forResource: "bdinfo-cli", withExtension: nil) else {
                 DispatchQueue.main.async {
-                    self.bdInfoText = "❌ 错误：在应用包内未找到 bdinfo-cli 核心组件。"
-                    self.stopTimer()
-                    self.isScanning = false
+                    self.bdInfoText += "❌ 错误：未找到 bdinfo-cli 组件。"
+                    self.stopTimer(); self.isScanning = false
                 }
                 return
             }
             
-            // 执行阶段 1
-            guard let topMpls = self.getTopPlaylist(at: url, executableURL: executableURL) else {
-                DispatchQueue.main.async {
-                    self.bdInfoText = "❌ 错误：未能从光盘中解析出有效的播放列表 (.mpls)。\n请确保这真的是一个合法的蓝光 BDMV 目录。"
-                    self.stopTimer()
-                    self.isScanning = false
-                }
-                return
-            }
-            
-            DispatchQueue.main.async {
-                self.bdInfoText += "\n\n▶ 已锁定最长正片列表: [ \(topMpls) ]\n▶ 正在强制分配定向扫描任务，彻底绕过互动拦截...\n▶ 开始深度物理测算，请观察下方进度条。"
-            }
-            
-            // 执行阶段 2
             let tempOutputDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
             try? FileManager.default.createDirectory(at: tempOutputDir, withIntermediateDirectories: true)
             
             let process = Process()
             process.executableURL = executableURL
-            // 关键修改：使用 -m 指定播放列表，引擎就不会卡住等用户回车了！
-            process.arguments = ["-m", topMpls, url.path, tempOutputDir.path]
+            
+            if let topMpls = self.getTopPlaylist(at: url, executableURL: executableURL) {
+                DispatchQueue.main.async { self.bdInfoText += "▶ 已成功锁定正片: [ \(topMpls) ]\n▶ 开始深度测算，请观察下方进度条。" }
+                process.arguments = ["-m", topMpls, url.path, tempOutputDir.path]
+            } else if let largestM2TS = self.findLargestM2TS(in: url) {
+                let fileName = (largestM2TS as NSString).lastPathComponent
+                DispatchQueue.main.async { self.bdInfoText += "⚠️ 未检测到播放列表，已锁定最大视频流 [ \(fileName) ]，开始裸流测算..." }
+                process.arguments = [largestM2TS, tempOutputDir.path]
+            } else {
+                DispatchQueue.main.async {
+                    self.bdInfoText += "❌ 错误：未找到有效的 .mpls 或 .m2ts 文件。\n如果确认目录没选错，请务必前往 Mac 的 [系统设置] 授予 Xcode 完全磁盘访问权限！"
+                    self.stopTimer(); self.isScanning = false
+                }
+                return
+            }
             
             let outPipe = Pipe()
             process.standardOutput = outPipe
-            process.standardError = outPipe // 将错误输出也合并，防止进度流失
-            
+            process.standardError = outPipe
             let outHandle = outPipe.fileHandleForReading
             outHandle.readabilityHandler = { handle in
                 let data = handle.availableData
                 guard !data.isEmpty, let output = String(data: data, encoding: .utf8) else { return }
-                
-                // 也可以把引擎真实的日志隐式打印到 Xcode 控制台方便调试
-                print(output, terminator: "")
-                
                 self.parseProgress(from: output)
             }
             
             do {
                 try process.run()
                 process.waitUntilExit()
-                
                 outHandle.readabilityHandler = nil
                 
                 if let reportFiles = try? FileManager.default.contentsOfDirectory(atPath: tempOutputDir.path),
                    let txtFile = reportFiles.first(where: { $0.hasSuffix(".txt") }) {
-                    
                     let reportPath = tempOutputDir.appendingPathComponent(txtFile)
                     let reportContent = try String(contentsOf: reportPath, encoding: .utf8)
-                    
                     DispatchQueue.main.async {
                         self.bdInfoText = reportContent
                         self.scanProgress = 1.0
-                        self.stopTimer()
-                        self.isScanning = false
+                        self.stopTimer(); self.isScanning = false
                     }
                 } else {
                     DispatchQueue.main.async {
-                        self.bdInfoText = "⚠️ 扫描完成，但未能找到生成的报告文件。"
-                        self.stopTimer()
-                        self.isScanning = false
+                        self.bdInfoText += "\n⚠️ 扫描结束，但引擎未能生成报告。"
+                        self.stopTimer(); self.isScanning = false
                     }
                 }
             } catch {
                 DispatchQueue.main.async {
                     outHandle.readabilityHandler = nil
-                    self.bdInfoText = "❌ BDInfo 引擎执行崩溃: \(error.localizedDescription)"
-                    self.stopTimer()
-                    self.isScanning = false
+                    self.bdInfoText += "\n❌ 引擎崩溃: \(error.localizedDescription)"
+                    self.stopTimer(); self.isScanning = false
                 }
             }
         }
     }
     
-    // MARK: - 正则表达式解析进度
     private func parseProgress(from output: String) {
         let pattern = "([0-9]+(?:\\.[0-9]+)?)\\s*%"
         guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return }
-        
         let nsString = output as NSString
         let results = regex.matches(in: output, options: [], range: NSRange(location: 0, length: nsString.length))
-        
         if let lastMatch = results.last {
             let matchRange = lastMatch.range(at: 1)
             let percentageStr = nsString.substring(with: matchRange)
-            
             if let percentage = Double(percentageStr) {
-                DispatchQueue.main.async {
-                    self.scanProgress = min(percentage / 100.0, 0.999)
-                }
+                DispatchQueue.main.async { self.scanProgress = min(percentage / 100.0, 0.999) }
             }
         }
     }
     
-    // MARK: - 导出逻辑
     private func exportToFile() {
         let panel = NSSavePanel()
         panel.title = "导出 BDinfo"
         panel.nameFieldStringValue = "BDinfo_Report.txt"
         panel.allowedContentTypes = [.plainText]
-        
         if panel.runModal() == .OK, let url = panel.url {
             do { try bdInfoText.write(to: url, atomically: true, encoding: .utf8) }
-            catch { print("保存失败: \(error)") }
+            catch { print("保存失败") }
         }
     }
 }
