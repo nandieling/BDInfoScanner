@@ -1,5 +1,5 @@
 
-# Mac 原生 BDInfo 扫描器 (BDInfoScanner for Mac)
+# Mac 原生 BDInfo 扫描器
 
 ![Platform](https://img.shields.io/badge/Platform-macOS%2012.0%2B-blue.svg)
 ![Language](https://img.shields.io/badge/Language-Swift%20%7C%20SwiftUI-orange.svg)
